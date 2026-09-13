@@ -84,6 +84,15 @@ The start command is captured from the live DSH process (`process.execPath` + `p
 - A Chromium-family browser must be installed. Edge ships with Windows, so this is normally satisfied.
 - This plugin drives an existing browser. It is **not** the official Electron desktop app — DSH reserves a `desktop` profile for that, and it is distributed separately.
 - The generated launcher is written **ASCII-only on purpose**. Windows PowerShell 5.1 reads `.ps1` files using the ANSI code page unless the file carries a UTF-8 BOM, so non-ASCII comments can corrupt parsing. If you fork this, keep it plain ASCII.
+- The server is started from a generated **`.cmd` file** rather than `cmd /c "<quoted path>" ... > log`. When the first character after `/c` is a quote, cmd.exe's quote-stripping rules make the whole command — redirect included — mis-parse, and it fails *silently*: no output file, no console, nothing.
+- The temporary script that creates the `.lnk` is written **with a UTF-8 BOM**, because it embeds user-supplied paths. Without the BOM a non-ASCII icon path is decoded as ANSI and comes back corrupted, leaving the shortcut with a default icon.
+
+## Implementation notes for forkers
+
+Two bugs found while building this are preserved as comments in `lib/desktop.js`, because both are easy to reintroduce:
+
+1. **`cmd /c` quote-stripping.** A launcher that "does nothing when clicked", with no log file written, is the signature of a failed redirect — not a missing file.
+2. **BOM-less `.ps1` carrying a user path.** Anything generated that embeds a path must be written with a BOM, or the path is silently mangled.
 
 ## Verify
 
