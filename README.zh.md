@@ -46,6 +46,7 @@ Agent 会替你调用 `desktop_app`。也可以明确指定动作：
 | `install` | 生成启动器并创建桌面快捷方式。 |
 | `remove` | 删除快捷方式和启动器。 |
 | `open` | 立刻打开应用窗口，不安装任何东西。 |
+| `restart` | 重启 DSH 服务本身并重新打开应用窗口。采用**脱离进程 + 延时**方式，保证你的回复先送达再断服务。 |
 
 可选参数：
 
@@ -54,16 +55,41 @@ Agent 会替你调用 `desktop_app`。也可以明确指定动作：
 | `browser` | 浏览器 id（`edge`、`chrome`、`brave`、`vivaldi`、`opera`）或 Chromium 内核可执行文件的绝对路径。默认取第一个探测到的。 |
 | `icon` | 快捷方式图标的 `.ico` 绝对路径。默认用浏览器自带图标。 |
 | `shortcutName` | 桌面上的快捷方式文件名。默认 `DeepSeek Harness.lnk`。 |
+| `delaySeconds` | 仅 `restart` 用。停止服务前等待的秒数。默认 15，上限 300。 |
+| `closeOldWindows` | 仅 `restart` 用。新应用窗口出现后，关闭重启前已存在的 App 模式窗口。默认 `true`。**只关 DSH 的 App 窗口**，普通浏览器窗口绝不触碰——关它会连带丢掉你其他标签页。 |
+
+## 关于重启
+
+`restart` 是唯一带"副作用"的动作：它必须**停掉正在运行它自己的那个服务**。它会生成一个助手脚本、**在本服务的 job object 之外**启动它，并在**确认它真的活着**之后才返回成功：
+
+1. 助手先等待 `delaySeconds`（默认 15 秒），让你的回复先送达；
+2. 停掉占用端口的进程；
+3. 等待端口真正释放；
+4. 通过启动器重新拉起——隐藏控制台，就绪后弹出应用窗口；
+5. 关闭屏幕上所有的 App 模式 DSH 窗口（`closeOldWindows`，默认开启）——原因见下；
+6. 若启动器没能把服务拉起来，**回退到可见控制台**，绝不让你落到"什么都没有"的境地。
+
+如果你要 fork，有两点值得知道：
+
+- **光用 `child_process.spawn` 是不够的。** DSH 用 Windows Job Object 管理子进程，spawn 出来的助手会继承 job 成员身份并被一起回收——实际表现是"进程出现后连一行都没执行就消失"，而动作当时**仍然报告成功**。所以助手改用 `Win32_Process.Create` 创建，父进程是 `WmiPrvSE.exe`，位于 job 之外。动作之后会轮询助手的首行日志，**没出现就大声报错**。
+- **关旧窗口刻意安排在"新窗口创建之前"。** 服务已停，此时屏幕上每一个 DSH 窗口按定义都是死页面，而新窗口还不可能存在——所以这一步没有竞态。**更早的版本是"等新句柄出现，再关旧的"，结果不可靠**：Chromium 有时会聚焦或复用已有的 App 窗口而不新建，于是永远等不到新句柄，就什么都没关。
+- **窗口筛选刻意保守。** 只有"标题包含应用标识、且不含浏览器标识"的窗口才符合条件。一个同时开着 DSH 标签页和其他标签页的浏览器窗口会被跳过——关掉它会丢掉用户的其他工作。另外标识用 `Microsoft` 而非 `Microsoft Edge`：真实的 Edge 标题里有个字符在控制台会渲染成 `?`。
+
+日志在 `~/.dsh/desktop-app/restart.log`。
 
 ## 会创建哪些文件
 
 ```
-~/.dsh/desktop-app/launch.ps1     启动器（用 install 动作可重新生成）
-~/.dsh/desktop-app/server.log     仅当启动器需要拉起 DSH 时才有内容
-<桌面>/DeepSeek Harness.lnk        指向启动器的快捷方式
+~/.dsh/desktop-app/launch.ps1        启动器（用 install 动作可重新生成）
+~/.dsh/desktop-app/start-server.cmd  记录下来的启动命令
+~/.dsh/desktop-app/restart.ps1       restart 动作生成的脱离式重启助手
+~/.dsh/desktop-app/server.log        仅当启动器需要拉起 DSH 时才有内容
+~/.dsh/desktop-app/launcher.log      启动器诊断日志
+~/.dsh/desktop-app/restart.log       重启助手诊断日志
+<桌面>/DeepSeek Harness.lnk           指向启动器的快捷方式
 ```
 
-`remove` 会删除快捷方式和 `launch.ps1`；`server.log` 特意保留。
+`remove` 会删除快捷方式、`launch.ps1` 和 `start-server.cmd`；各类日志特意保留。
 
 ## 工作原理
 

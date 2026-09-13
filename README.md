@@ -46,6 +46,7 @@ The agent calls `desktop_app` for you. Or be explicit about the action:
 | `install` | Writes the launcher and creates the Desktop shortcut. |
 | `remove` | Deletes the shortcut and the launcher. |
 | `open` | Opens the app window right now, without installing anything. |
+| `restart` | Restarts the DSH server itself and reopens the app window. Detached and delayed, so your reply is delivered before the server goes down. |
 
 Optional parameters:
 
@@ -54,16 +55,41 @@ Optional parameters:
 | `browser` | A browser id (`edge`, `chrome`, `brave`, `vivaldi`, `opera`) or an absolute path to a Chromium-family executable. Defaults to the first one detected. |
 | `icon` | Absolute path to a `.ico` file for the shortcut. Defaults to the browser's own icon. |
 | `shortcutName` | Shortcut file name on the Desktop. Defaults to `DeepSeek Harness.lnk`. |
+| `delaySeconds` | `restart` only. Seconds to wait before stopping the server. Defaults to 15, capped at 300. |
+| `closeOldWindows` | `restart` only. Once the new app window has appeared, close the app-mode windows that existed before the restart. Defaults to `true`. Only DSH app windows are closed — a normal browser window is never touched, because closing it would take your other tabs with it. |
+
+## Restarting
+
+`restart` is the one action with a twist: it has to stop the server that is running it. It writes a helper, starts it **outside this server's job object**, and verifies it is actually alive before reporting success.
+
+1. the helper waits `delaySeconds` (15 by default) so the reply reaches you first;
+2. it stops whatever holds the port;
+3. it waits for the port to be released;
+4. it relaunches through the launcher — hidden console, app window when ready;
+5. it closes the app-mode windows that were on screen (`closeOldWindows`, on by default) — see below;
+6. if the launcher cannot bring the server up, it falls back to a **visible console** so you are never left with nothing.
+
+Three things worth knowing if you fork this:
+
+- **A plain `child_process.spawn` is not enough.** DSH manages its children through a Windows job object, so a spawned helper inherits job membership and is torn down with it — observed in practice as a process that appears and then exits before executing a single line, while the action still reported success. The helper is therefore created with `Win32_Process.Create`, which parents it to `WmiPrvSE.exe`, outside the job. The action then polls for the helper's first log line and **fails loudly** if it never shows up.
+- **Old windows are closed *before* the replacement is created, on purpose.** With the server stopped, every DSH window on screen is dead by definition and the new one cannot exist yet, so the step is race-free. An earlier version waited for a "new" window handle to appear and only then closed the old ones — that proved unreliable, because Chromium sometimes focuses or reuses the existing app window instead of creating a new one, so no new handle ever appeared and nothing was closed.
+- **The window filter is deliberately conservative.** Only titles containing the app marker and no browser-name marker qualify. A browser window holding the DSH tab *plus other tabs* is skipped, because closing it would lose the user's other work. Note the marker uses `Microsoft` rather than `Microsoft Edge`: the real Edge title contains a character that renders as `?` in consoles.
+
+The helper log is at `~/.dsh/desktop-app/restart.log`.
 
 ## What gets created
 
 ```
 ~/.dsh/desktop-app/launch.ps1     the launcher (regenerate with `install`)
+~/.dsh/desktop-app/start-server.cmd  the recorded start command
+~/.dsh/desktop-app/restart.ps1    the detached restart helper, written by `restart`
 ~/.dsh/desktop-app/server.log     server output, only when the launcher had to start DSH
+~/.dsh/desktop-app/launcher.log   launcher diagnostics
+~/.dsh/desktop-app/restart.log    restart helper diagnostics
 <Desktop>/DeepSeek Harness.lnk    the shortcut, pointing at the launcher
 ```
 
-`remove` deletes the shortcut and `launch.ps1`; `server.log` is left behind on purpose.
+`remove` deletes the shortcut, `launch.ps1` and `start-server.cmd`; the logs are left behind on purpose.
 
 ## How it works
 
