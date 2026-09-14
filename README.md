@@ -6,11 +6,33 @@
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that registers one host tool, `desktop_app`. It turns the Web GUI into a window that looks and behaves like native software: **no browser tabs, no address bar, no bookmark bar, its own taskbar entry and icon**.
 
-It uses your existing Chromium-family browser in [`--app` mode](https://developer.chrome.com/docs/apps/) — no Electron, no extra runtime, nothing to download.
+It uses your existing Chromium-family browser in [`--app` mode](https://developer.chrome.com/docs/apps/) — no Electron, no extra runtime, nothing to download. A small **notification-area host** keeps the app reachable after the window is closed, so closing the window no longer means stopping the service.
 
 ## Why
 
 By default DSH opens in a browser tab, mixed in with your other tabs. `--app` mode gives you a dedicated window instead, which is what you actually want for something you keep open all day.
+
+## System tray
+
+A browser window cannot minimise itself to the notification area, and closing it takes its process with it — so tray residency needs a separate long-lived process. The generated launcher starts one small PowerShell host (`tray-host.ps1` + `tray-host.cs`, no extra runtime) before opening the window.
+
+| What you do | What happens |
+|---|---|
+| Double-click the tray icon | Window restored (or opened, if you closed it) |
+| Right-click → `Minimise to tray` | Window hidden; the service keeps running |
+| Right-click → `Open DeepSeek Harness` | Opens the window again with a freshly read token |
+| Right-click → `Restart the local service` | Runs the detached restart helper |
+| Right-click → `Quit tray host` | Stops the tray host (the service keeps running) |
+| Close the window with X | Window closes, the service **keeps running**, and the tray host says so once |
+
+If the [dsh-schedule-panel](https://github.com/MARIOMLY/dsh-schedule-panel) plugin is installed, its panel also offers a **“收进托盘” (minimise to tray)** button: the page cannot hide a native window, so it drops a request file (`tray-command.txt`) that the tray host picks up within a second.
+
+> The icon defaults to the browser's own; drop a `tray.ico` next to `lib/desktop.js` (or point `install` at one with `icon`) to brand it.
+
+### What can't be done, and why
+
+- **The X button cannot be redefined from outside.** Subclassing the window procedure across processes (`SetWindowLongPtr` on another process's window) returns `ERROR_ACCESS_DENIED (5)` on Windows 10/11. Verified; the code does not attempt it.
+- **`beforeunload` confirmations do not appear** in a programmatically opened `--app` window — Chromium suppresses them. Use the tray button or the tray icon instead; both are deterministic.
 
 ## Install
 
@@ -83,13 +105,20 @@ The helper log is at `~/.dsh/desktop-app/restart.log`.
 ~/.dsh/desktop-app/launch.ps1     the launcher (regenerate with `install`)
 ~/.dsh/desktop-app/start-server.cmd  the recorded start command
 ~/.dsh/desktop-app/restart.ps1    the detached restart helper, written by `restart`
+~/.dsh/desktop-app/tray-host.ps1  the notification-area host
+~/.dsh/desktop-app/tray-host.cs   its C# companion (Win32 window + NotifyIcon)
+~/.dsh/desktop-app/tray-host.cmd  quoting-safe launcher for the host
+~/.dsh/desktop-app/tray.ico       the tray icon (optional; browser icon otherwise)
+~/.dsh/desktop-app/tray-url.txt   the tokenised boot URL, for reopening the window
+~/.dsh/desktop-app/tray-command.txt  request file the web page writes to hide the window
 ~/.dsh/desktop-app/server.log     server output, only when the launcher had to start DSH
 ~/.dsh/desktop-app/launcher.log   launcher diagnostics
 ~/.dsh/desktop-app/restart.log    restart helper diagnostics
+~/.dsh/desktop-app/tray.log       tray host diagnostics
 <Desktop>/DeepSeek Harness.lnk    the shortcut, pointing at the launcher
 ```
 
-`remove` deletes the shortcut, `launch.ps1` and `start-server.cmd`; the logs are left behind on purpose.
+`remove` stops the tray host and deletes the shortcut, `launch.ps1`, `start-server.cmd` and the tray files; the logs are left behind on purpose.
 
 ## How it works
 

@@ -6,11 +6,33 @@
 
 这是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，注册一个宿主工具 `desktop_app`，把 Web GUI 变成一个像原生软件一样的窗口：**没有浏览器标签页、没有地址栏、没有书签栏，任务栏有独立图标**。
 
-它复用你已有的 Chromium 内核浏览器，走 [`--app` 模式](https://developer.chrome.com/docs/apps/)——不需要 Electron，不需要额外运行时，也不需要下载任何东西。
+它复用你已有的 Chromium 内核浏览器，走 [`--app` 模式](https://developer.chrome.com/docs/apps/)——不需要 Electron，不需要额外运行时，也不需要下载任何东西。另外带一个轻量的**系统托盘宿主**：关掉窗口不再等于关掉服务，随时能从托盘叫回来。
 
 ## 为什么需要它
 
 默认情况下 DSH 开在浏览器标签页里，和你的其他标签页混在一起。`--app` 模式给你一个专属窗口，对于一个要开一整天的东西来说，这才是顺手的形态。
+
+## 系统托盘
+
+浏览器窗口**无法把自己最小化到通知区域**，而关掉窗口会连进程一起带走——所以托盘驻留需要一个额外的常驻进程。生成的 launcher 会在开窗口**之前**先启动一个小的 PowerShell 宿主（`tray-host.ps1` + `tray-host.cs`，无额外运行时）。
+
+| 你做什么 | 会发生什么 |
+|---|---|
+| 双击托盘图标 | 恢复窗口（已关掉则新开一个） |
+| 右键 → `Minimise to tray` | 窗口隐藏，服务继续运行 |
+| 右键 → `Open DeepSeek Harness` | 重新打开窗口（token 会重新读取） |
+| 右键 → `Restart the local service` | 运行那个脱离式重启助手 |
+| 右键 → `Quit tray host` | 退出托盘宿主（服务继续运行） |
+| 点窗口的 X | 窗口关闭，**服务继续运行**，托盘弹一条说明 |
+
+如果同时装了 [dsh-schedule-panel](https://github.com/MARIOMLY/dsh-schedule-panel)，它的面板还会提供一个**「收进托盘」按钮**：网页无法隐藏原生窗口，所以页面写一个请求文件（`tray-command.txt`），托盘宿主一秒内执行。
+
+> 托盘图标默认用浏览器的；把 `tray.ico` 放在 `lib/desktop.js` 旁边（或给 `install` 传 `icon`）就能换成自己的。
+
+### 做不到的两件事（以及原因）
+
+- **X 按钮无法从外部重新定义**：跨进程子类化窗口过程（对别的进程的窗口调 `SetWindowLongPtr`）在 Windows 10/11 上返回 `ERROR_ACCESS_DENIED (5)`。已实测，代码里不再尝试。
+- **`beforeunload` 确认框不会出现**：程序化打开的 `--app` 窗口里，Chromium 会静默跳过它。请改用托盘按钮或托盘图标，这两个都是确定有效的。
 
 ## 安装
 
@@ -83,13 +105,20 @@ Agent 会替你调用 `desktop_app`。也可以明确指定动作：
 ~/.dsh/desktop-app/launch.ps1        启动器（用 install 动作可重新生成）
 ~/.dsh/desktop-app/start-server.cmd  记录下来的启动命令
 ~/.dsh/desktop-app/restart.ps1       restart 动作生成的脱离式重启助手
+~/.dsh/desktop-app/tray-host.ps1     系统托盘宿主
+~/.dsh/desktop-app/tray-host.cs      它的 C# 伴生文件（Win32 窗口 + NotifyIcon）
+~/.dsh/desktop-app/tray-host.cmd     引号安全的宿主启动器
+~/.dsh/desktop-app/tray.ico          托盘图标（可选；没有则用浏览器图标）
+~/.dsh/desktop-app/tray-url.txt      带令牌的启动 URL，用于重新打开窗口
+~/.dsh/desktop-app/tray-command.txt  网页写下的"隐藏窗口"请求文件
 ~/.dsh/desktop-app/server.log        仅当启动器需要拉起 DSH 时才有内容
 ~/.dsh/desktop-app/launcher.log      启动器诊断日志
 ~/.dsh/desktop-app/restart.log       重启助手诊断日志
+~/.dsh/desktop-app/tray.log          托盘宿主诊断日志
 <桌面>/DeepSeek Harness.lnk           指向启动器的快捷方式
 ```
 
-`remove` 会删除快捷方式、`launch.ps1` 和 `start-server.cmd`；各类日志特意保留。
+`remove` 会停掉托盘宿主，并删除快捷方式、`launch.ps1`、`start-server.cmd` 与托盘相关文件；各类日志特意保留。
 
 ## 工作原理
 

@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop-app",
-  "version": "0.1.0",
-  "description": "Turn the DeepSeek Harness Web UI into a standalone desktop app window (Chromium --app mode) — install, remove and open the shortcut from inside a DSH session. / 把 DSH Web 界面变成独立桌面应用窗口：在会话内一键安装、卸载与打开快捷方式。",
+  "version": "0.2.2",
+  "description": "Turn the DeepSeek Harness Web UI into a standalone desktop app window (Chromium --app mode) with a system-tray host: minimise to tray, reopen a closed window, and keep the local server running. / 把 DSH Web 界面变成独立桌面应用窗口，并常驻系统托盘：可最小化到托盘、关闭窗口后从托盘叫回、服务继续在后台运行。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -14,7 +14,11 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
-    "LICENSE"
+    "LICENSE",
+    "lib/tray-host.ps1",
+    "lib/tray-host.cs",
+    "lib/tray-host.cmd",
+    "lib/tray.ico"
   ],
   "keywords": [
     "deepseek",
@@ -24,7 +28,9 @@
     "desktop",
     "app-mode",
     "shortcut",
-    "pwa"
+    "pwa",
+    "system-tray",
+    "notification-area"
   ],
   "license": "MIT",
   "repository": {
@@ -51,5 +57,8 @@
     "@deepseek-ai/dsh-tools": {
       "optional": true
     }
+  },
+  "scripts": {
+    "pack": "npm pack"
   }
 }
