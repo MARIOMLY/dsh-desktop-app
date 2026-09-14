@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop-app",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "description": "Turn the DeepSeek Harness Web UI into a standalone desktop app window (Chromium --app mode) with a system-tray host: minimise to tray, reopen a closed window, and keep the local server running. / 把 DSH Web 界面变成独立桌面应用窗口，并常驻系统托盘：可最小化到托盘、关闭窗口后从托盘叫回、服务继续在后台运行。",
   "type": "module",
   "main": "lib/index.js",
